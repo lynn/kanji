@@ -32,7 +32,8 @@ type Recipe' = Recipe String
 toposort :: Eq a => Map a [a] -> [[a]]
 toposort m = reverse $ snd $ until (null . fst) freeNodes (m, [])
     where freeNodes :: Eq a => (Map a [a], [[a]]) -> (Map a [a], [[a]])
-          freeNodes (m, result) = (dependent, free:result)
+          freeNodes (m, result) = if dependent == m then (M.empty, []) -- cycle check
+                                  else (dependent, free:result)
               where (free_m, dependent_m) = M.partition null m
                     free = M.keys free_m
                     dependent = M.map (\\ free) dependent_m
@@ -43,6 +44,8 @@ testToposort = mapMaybe check tests
           free i = (i, []) -- for legibility
           tests = [([], []),
                    ([(0, [1,2]), free 1, free 2], [[1,2],[0]]),
+                   ([free 0, (1, [0,0])], []), -- duplicate in list (deemed illegal)
+                   ([(1, [2]), (2, [1])], []), -- cycle
                    (
                        [free 1, free 2, free 3, (4, [2]), (5, [1,3]), (6, [1,4])],
                         [[1,2,3], [4,5], [6]]
