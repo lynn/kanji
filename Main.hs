@@ -1,4 +1,5 @@
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE DeriveTraversable #-}
 -- cabal install split
 module Main where
 
@@ -16,9 +17,17 @@ import qualified Data.Text.IO as T
 import Control.Applicative
 import Control.Monad
 import Debug.Trace
+import qualified Text.Parsec as P
+
+type Parser = P.Parsec String ()
 
 type Kanji = String
-type Recipe = String
+type RecipeString = String
+
+data Recipe a = Atom a | IDC Char (Recipe a) (Recipe a)
+    deriving (Eq, Ord, Show, Functor, Foldable, Traversable)
+
+type Recipe' = Recipe String
 
 toposort :: Eq a => Map a [a] -> [[a]]
 toposort m = reverse $ snd $ until (null . fst) freeNodes (m, [])
@@ -39,7 +48,7 @@ testToposort = mapMaybe check tests
                         [[1,2,3], [4,5], [6]]
                    )]
 
-parseChise :: [String] -> Map Kanji Recipe
+parseChise :: [String] -> Map Kanji RecipeString
 parseChise chiseLines =
     let
         isComment line = null line || take 1 line == ";"
@@ -47,6 +56,32 @@ parseChise chiseLines =
         pairs = [(k, r) | line <- recipeLines, let (_:k:r:_) = splitOn "\t" line]
     in
         M.fromList pairs
+
+isIDC :: Char -> Bool
+isIDC c = c `elem` ['⿰'..'⿻']
+
+parseIdentifier :: Parser Recipe'
+parseIdentifier = do
+    P.char '&'
+    name <- P.many (P.noneOf ";")
+    P.char ';'
+    pure (Atom $ "&" ++ name ++ ";")
+
+parseKanji :: Parser Recipe'
+parseKanji = Atom . pure <$> P.satisfy (not . isIDC)
+
+parseAtom :: Parser Recipe'
+parseAtom = parseIdentifier <|> parseKanji
+
+parseIDC :: Parser Recipe'
+parseIDC = do
+    idc <- P.satisfy isIDC
+    left <- parseRecipe
+    right <- parseRecipe
+    pure (IDC idc left right)
+
+parseRecipe :: Parser Recipe'
+parseRecipe = parseIDC <|> parseAtom
 
 main :: IO ()
 main = do
@@ -56,4 +91,3 @@ main = do
     print (length frequencyList)
     let recipes = parseChise (lines chise)
     print (M.size recipes)
-    mapM_ (T.putStrLn . pack) recipes
