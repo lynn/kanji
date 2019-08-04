@@ -1,6 +1,6 @@
 #!/bin/sh
 
-FREQ=frequency-2501.txt
+FREQ=2501.txt
 JOYO=joyo.txt
 
 OUTPUT=
