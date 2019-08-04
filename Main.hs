@@ -1,5 +1,6 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE DeriveTraversable #-}
+{-# LANGUAGE ExistentialQuantification #-}
 -- cabal install split
 module Main where
 
@@ -14,6 +15,7 @@ import Data.Maybe
 import Data.Text (pack)
 import qualified Data.Text.IO as T
 
+import Control.Arrow
 import Control.Applicative
 import Control.Monad
 import Debug.Trace
@@ -29,6 +31,10 @@ data Recipe a = Atom a | IDC Char (Recipe a) (Recipe a)
 
 type Recipe' = Recipe String
 
+----------
+-- topo --
+----------
+
 toposort :: Eq a => Map a [a] -> [[a]]
 toposort m = reverse $ snd $ until (null . fst) freeNodes (m, [])
     where freeNodes :: Eq a => (Map a [a], [[a]]) -> (Map a [a], [[a]])
@@ -38,10 +44,9 @@ toposort m = reverse $ snd $ until (null . fst) freeNodes (m, [])
                     free = M.keys free_m
                     dependent = M.map (\\ free) dependent_m
 
-testToposort :: [String] -- list of test failures
-testToposort = mapMaybe check tests
-    where check (x,y) = if toposort (M.fromList x) == y then Nothing else Just $ show x
-          free i = (i, []) -- for legibility
+testToposort :: [TestFailure]
+testToposort = mapMaybe (test toposort) $ map (first M.fromList) tests
+    where free i = (i, []) -- for legibility
           tests = [([], []),
                    ([(0, [1,2]), free 1, free 2], [[1,2],[0]]),
                    ([free 0, (1, [0,0])], []), -- duplicate in list (deemed illegal)
@@ -50,6 +55,10 @@ testToposort = mapMaybe check tests
                        [free 1, free 2, free 3, (4, [2]), (5, [1,3]), (6, [1,4])],
                         [[1,2,3], [4,5], [6]]
                    )]
+
+-----------
+-- parse --
+-----------
 
 parseChise :: [String] -> Map Kanji RecipeString
 parseChise chiseLines =
@@ -86,9 +95,38 @@ parseIDC = do
 parseRecipe :: Parser Recipe'
 parseRecipe = parseIDC <|> parseAtom
 
+testParser :: [TestFailure]
+testParser = mapMaybe (test $ P.parse parseRecipe "") $ map (second Right) tests
+    where tests = [("x", Atom "x"),
+                   ("⿰氵&CDP-8BD3;", IDC '⿰' (Atom "氵") (Atom "&CDP-8BD3;")), -- 漢
+                   ("⿱宀子", IDC '⿱' (Atom "宀") (Atom "子")), -- 字
+                   -- TODO: handle trinary idcs
+                   -- ("⿳⿲木缶木冖⿰鬯彡", -- 鬱
+                   --  IDC '⿳'
+                   --      [IDC '⿲' $ map Atom ["木","缶","木"],
+                   --       Atom "冖",
+                   --       IDC '⿰' $ map Atom ["鬯","彡"]])
+                   -- )
+                   ("⿻⿻xy⿻zw",
+                    IDC '⿻' (IDC '⿻' (Atom "x") (Atom "y"))
+                             (IDC '⿻' (Atom "z") (Atom "w")))
+                  ]
+
+------------------
+-- test harness --
+------------------
+
+data TestFailure = forall a. (Show a) => TestFailure a
+instance Show TestFailure where show (TestFailure x) = show x
+
+test :: (Show a, Eq b) => (a -> b) -> (a, b) -> Maybe TestFailure
+test f (input, expected) = guard (f input /= expected) >> Just (TestFailure input)
+
+testResults = testToposort ++ testParser
+
 main :: IO ()
 main = do
-    when (not $ null testToposort) $ error $ "test(s) failed: " ++ show testToposort
+    when (not $ null testResults) $ error $ "test(s) failed: " ++ show testResults
     chise <- readFile "chise.txt"
     (frequencyList :: [Kanji]) <- lines <$> readFile "frequent-joyo.txt"
     print (length frequencyList)
