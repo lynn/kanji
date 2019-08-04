@@ -8,6 +8,10 @@ import Data.Set (Set)
 import Data.List
 import Data.List.Split
 import Data.Maybe
+
+import Data.Text (pack)
+import qualified Data.Text.IO as T
+
 import Control.Applicative
 import Control.Monad
 import Debug.Trace
@@ -29,3 +33,4 @@ main = do
     chise <- readFile "chise.txt"
     let recipes = parseChise (lines chise)
     print (M.size recipes)
+    mapM_ (T.putStrLn . pack) recipes
