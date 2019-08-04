@@ -26,7 +26,9 @@ type Parser = P.Parsec String ()
 type Kanji = String
 type RecipeString = String
 
-data Recipe a = Atom a | IDC Char (Recipe a) (Recipe a)
+data Recipe a = Atom a
+              | IDC Char (Recipe a) (Recipe a)
+              | IDC3 Char (Recipe a) (Recipe a) (Recipe a)
     deriving (Eq, Ord, Show, Functor, Foldable, Traversable)
 
 type Recipe' = Recipe String
@@ -70,7 +72,10 @@ parseChise chiseLines =
         M.fromList pairs
 
 isIDC :: Char -> Bool
-isIDC c = c `elem` ['⿰'..'⿻']
+isIDC c = c `elem` ['⿰'..'⿻'] \\ "⿲⿳"
+
+isIDC3 :: Char -> Bool
+isIDC3 c = c `elem` "⿲⿳"
 
 parseIdentifier :: Parser Recipe'
 parseIdentifier = do
@@ -85,31 +90,31 @@ parseKanji = Atom . pure <$> P.satisfy (not . isIDC)
 parseAtom :: Parser Recipe'
 parseAtom = parseIdentifier <|> parseKanji
 
+parseIDC3 :: Parser Recipe'
+parseIDC3 = liftM4 IDC3 (P.satisfy isIDC3) parseRecipe parseRecipe parseRecipe
+
 parseIDC :: Parser Recipe'
-parseIDC = do
-    idc <- P.satisfy isIDC
-    left <- parseRecipe
-    right <- parseRecipe
-    pure (IDC idc left right)
+parseIDC = liftM3 IDC (P.satisfy isIDC) parseRecipe parseRecipe
 
 parseRecipe :: Parser Recipe'
-parseRecipe = parseIDC <|> parseAtom
+parseRecipe = parseIDC3 <|> parseIDC <|> parseAtom
 
 testParser :: [TestFailure]
 testParser = mapMaybe (test $ P.parse parseRecipe "") $ map (second Right) tests
-    where tests = [("x", Atom "x"),
-                   ("⿰氵&CDP-8BD3;", IDC '⿰' (Atom "氵") (Atom "&CDP-8BD3;")), -- 漢
-                   ("⿱宀子", IDC '⿱' (Atom "宀") (Atom "子")), -- 字
-                   -- TODO: handle trinary idcs
-                   -- ("⿳⿲木缶木冖⿰鬯彡", -- 鬱
-                   --  IDC '⿳'
-                   --      [IDC '⿲' $ map Atom ["木","缶","木"],
-                   --       Atom "冖",
-                   --       IDC '⿰' $ map Atom ["鬯","彡"]])
-                   -- )
+    where idc c x y = IDC c (Atom x) (Atom y)
+          idc3 c x y z = IDC3 c (Atom x) (Atom y) (Atom z)
+          tests = [("x", Atom "x"),
+                   ("⿰氵&CDP-8BD3;", idc '⿰' "氵" "&CDP-8BD3;"), -- 漢
+                   ("⿱宀子", idc '⿱' "宀" "子"), -- 字
+                   ("⿳⿲木缶木冖⿰鬯彡", -- 鬱
+                    IDC3 '⿳'
+                        (idc3 '⿲' "木" "缶" "木")
+                        (Atom "冖")
+                        (idc '⿰' "鬯" "彡")
+                   ),
                    ("⿻⿻xy⿻zw",
-                    IDC '⿻' (IDC '⿻' (Atom "x") (Atom "y"))
-                             (IDC '⿻' (Atom "z") (Atom "w")))
+                    IDC '⿻' (idc '⿻' "x" "y")
+                             (idc '⿻' "z" "w"))
                   ]
 
 ------------------
