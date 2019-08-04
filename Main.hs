@@ -1,3 +1,4 @@
+{-# LANGUAGE ScopedTypeVariables #-}
 -- cabal install split
 module Main where
 
@@ -31,6 +32,8 @@ parseChise chiseLines =
 main :: IO ()
 main = do
     chise <- readFile "chise.txt"
+    (frequencyList :: [Kanji]) <- lines <$> readFile "frequent-joyo.txt"
+    print (length frequencyList)
     let recipes = parseChise (lines chise)
     print (M.size recipes)
     mapM_ (T.putStrLn . pack) recipes
