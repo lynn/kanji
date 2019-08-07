@@ -1,6 +1,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE DeriveTraversable #-}
 {-# LANGUAGE ExistentialQuantification #-}
+{-# LANGUAGE CPP #-}
 module Main where
 
 import qualified Data.Map as M
@@ -9,6 +10,9 @@ import qualified Data.Set as S
 import Data.Set (Set)
 import Data.List
 import Data.Maybe
+import Data.Foldable
+import System.Directory
+import System.FilePath
 
 import Data.Text (pack)
 import qualified Data.Text.IO as T
@@ -140,14 +144,42 @@ test f (input, expected) = guard (f input /= expected) >> Just (TestFailure inpu
 
 testResults = testToposort ++ testRecipeParser ++ testChiseParser
 
+fixedPoint :: Eq a => (a -> a) -> a -> a
+fixedPoint f a =
+#ifdef HIGHLY_OPTIMIZED
+    f (f (f a))
+#else
+    let a' = f a in if a == a' then a else fixedPoint f a'
+#endif
+
+readRecipes :: IO (Map Kanji Recipe')
+readRecipes = do
+    chiseFiles <- getDirectoryContents "chise-ids"
+    let isIncluded name = any (`isPrefixOf` name) ["IDS-UCS", "IDS-CDP", "IDS-CNS"]
+    let sources = map ("chise-ids" </>) $ filter isIncluded chiseFiles
+    chiseText <- concat <$> mapM readFile sources
+    let recipes = case P.parse parseChiseMap "" chiseText of { Right r -> r; Left e -> error $ show e }
+    return recipes    
+
+readFrequentJoyo :: IO [Kanji]
+readFrequentJoyo = lines <$> readFile "frequent-joyo.txt"
+
+-- Given a recipe map and a list of kanji, return the set of atoms that those
+-- kanji break down into if you keep looking up their components.
+atomSet :: Map Kanji Recipe' -> [Kanji] -> [Kanji]
+atomSet recipes ks = sort $ fixedPoint iterate ks
+    where iterate = nub . concatMap (toList . lookup)
+          lookup k = M.findWithDefault (Atom k) k recipes  -- If we can't find a recipe, we assume it's atomic
+
 main :: IO ()
 main = do
     when (not $ null testResults) $ error $ "test(s) failed: " ++ show testResults
-    chise <- concat <$> mapM readFile [ "chise-ids/IDS-UCS-Basic.txt"
-                                      , "chise-ids/IDS-UCS-Ext-A.txt"
-                                      , "chise-ids/IDS-CDP.txt"
-                                      ]
-    (frequencyList :: [Kanji]) <- lines <$> readFile "frequent-joyo.txt"
-    print (length frequencyList)
-    let (Right recipes) = P.parse parseChiseMap "" chise
-    print (M.size recipes)
+    frequentJoyo <- readFrequentJoyo
+    recipes <- readRecipes
+
+    -- Break everything in the `frequentJoyo` list down until we have a list of atoms.
+    let atoms = atomSet recipes frequentJoyo
+    let isForeign k = M.notMember k recipes
+    putStrLn $ "Atoms: " ++ unwords atoms
+    putStrLn ""
+    putStrLn $ "Foreign atoms: " ++ unwords (filter isForeign atoms)
