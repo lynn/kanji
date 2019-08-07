@@ -1,7 +1,6 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE DeriveTraversable #-}
 {-# LANGUAGE ExistentialQuantification #-}
--- cabal install split
 module Main where
 
 import qualified Data.Map as M
@@ -9,7 +8,6 @@ import Data.Map (Map)
 import qualified Data.Set as S
 import Data.Set (Set)
 import Data.List
-import Data.List.Split
 import Data.Maybe
 
 import Data.Text (pack)
@@ -92,22 +90,21 @@ parseRecipe = parseIDC3 <|> parseIDC <|> parseAtom
 
 parseChiseEntry :: Parser (Kanji, Recipe')
 parseChiseEntry = do
-  P.many (P.noneOf "\t")
-  P.tab
-  kanji <- P.many (P.noneOf "\t")
-  P.tab
-  recipe <- parseRecipe
-  pure (kanji, recipe)
+    name    <- P.manyTill P.anyChar P.tab
+    kanji   <- P.manyTill P.anyChar P.tab
+    recipe  <- parseRecipe
+    comment <- P.manyTill P.anyChar P.endOfLine -- e.g. the "\t?" in IDS-UCS-Basic.txt:887
+    pure (kanji, recipe)
 
 parseChiseLine :: Parser (Kanji, Recipe')
-parseChiseLine = P.skipMany (parseChiseComment) >> parseChiseEntry
-    where parseChiseComment = P.optional (P.char ';' >> P.many (P.noneOf "\n")) >> P.newline
+parseChiseLine = P.skipMany commentLine >> parseChiseEntry
+    where commentLine = P.char ';' >> P.manyTill P.anyChar P.endOfLine
 
-parseChiseLines :: Parser (Map Kanji Recipe')
-parseChiseLines = M.fromList <$> P.many parseChiseLine
+parseChiseMap :: Parser (Map Kanji Recipe')
+parseChiseMap = M.fromList <$> (P.many parseChiseLine <* P.eof)
 
-testParser :: [TestFailure]
-testParser = mapMaybe (test $ P.parse parseRecipe "") $ map (second Right) tests
+testRecipeParser :: [TestFailure]
+testRecipeParser = mapMaybe (test $ P.parse parseRecipe "") $ map (second Right) tests
     where idc c x y = IDC c (Atom x) (Atom y)
           idc3 c x y z = IDC3 c (Atom x) (Atom y) (Atom z)
           tests = [("x", Atom "x"),
@@ -124,6 +121,13 @@ testParser = mapMaybe (test $ P.parse parseRecipe "") $ map (second Right) tests
                              (idc '⿻' "z" "w"))
                   ]
 
+testChiseParser :: [TestFailure]
+testChiseParser = catMaybes [test (P.parse parseChiseMap "") (input, output)]
+    where input  = "U+5160\t兠\t⿱⿲&CDP-8BC5;白匕儿\nU+5161\t兡\t⿺克百\n"
+          output = Right $ M.fromList
+            [ ("兠", IDC '⿱' (IDC3 '⿲' (Atom "&CDP-8BC5;") (Atom "白") (Atom "匕")) (Atom "儿"))
+            , ("兡", IDC '⿺' (Atom "克") (Atom "百")) ]
+
 ------------------
 -- test harness --
 ------------------
@@ -134,7 +138,7 @@ instance Show TestFailure where show (TestFailure x) = show x
 test :: (Show a, Eq b) => (a -> b) -> (a, b) -> Maybe TestFailure
 test f (input, expected) = guard (f input /= expected) >> Just (TestFailure input)
 
-testResults = testToposort ++ testParser
+testResults = testToposort ++ testRecipeParser ++ testChiseParser
 
 main :: IO ()
 main = do
@@ -145,5 +149,5 @@ main = do
                                       ]
     (frequencyList :: [Kanji]) <- lines <$> readFile "frequent-joyo.txt"
     print (length frequencyList)
-    let (Right recipes) = P.parse parseChiseLines "" chise
+    let (Right recipes) = P.parse parseChiseMap "" chise
     print (M.size recipes)
