@@ -129,11 +129,18 @@ test f (input, expected) = guard (f input /= expected) >> Just (TestFailure inpu
 
 testResults = testToposort ++ testParser
 
+-- concatFileLines ["a.txt", "b.txt"] yields: all lines of a.txt, then all lines of b.txt.
+concatFileLines :: [FilePath] -> IO [String]
+concatFileLines paths = concat <$> mapM (fmap lines . readFile) paths
+
 main :: IO ()
 main = do
     when (not $ null testResults) $ error $ "test(s) failed: " ++ show testResults
-    chise <- readFile "chise.txt"
+    chiseLines <- concatFileLines [ "chise-ids/IDS-UCS-Basic.txt"
+                                  , "chise-ids/IDS-UCS-Ext-A.txt"
+                                  , "chise-ids/IDS-CDP.txt"
+                                  ]
     (frequencyList :: [Kanji]) <- lines <$> readFile "frequent-joyo.txt"
     print (length frequencyList)
-    let recipes = parseChise (lines chise)
+    let recipes = parseChise chiseLines
     print (M.size recipes)
