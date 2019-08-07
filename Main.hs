@@ -62,15 +62,6 @@ testToposort = mapMaybe (test toposort) $ map (first M.fromList) tests
 -- parse --
 -----------
 
-parseChise :: [String] -> Map Kanji RecipeString
-parseChise chiseLines =
-    let
-        isComment line = null line || take 1 line == ";"
-        recipeLines = filter (not . isComment) chiseLines
-        pairs = [(k, r) | line <- recipeLines, let (_:k:r:_) = splitOn "\t" line]
-    in
-        M.fromList pairs
-
 isIDC :: Char -> Bool
 isIDC c = c `elem` ['⿰'..'⿻'] \\ "⿲⿳"
 
@@ -98,6 +89,22 @@ parseIDC = liftM3 IDC (P.satisfy isIDC) parseRecipe parseRecipe
 
 parseRecipe :: Parser Recipe'
 parseRecipe = parseIDC3 <|> parseIDC <|> parseAtom
+
+parseChiseEntry :: Parser (Kanji, Recipe')
+parseChiseEntry = do
+  P.many (P.noneOf "\t")
+  P.tab
+  kanji <- P.many (P.noneOf "\t")
+  P.tab
+  recipe <- parseRecipe
+  pure (kanji, recipe)
+
+parseChiseLine :: Parser (Kanji, Recipe')
+parseChiseLine = P.skipMany (parseChiseComment) >> parseChiseEntry
+    where parseChiseComment = P.optional (P.char ';' >> P.many (P.noneOf "\n")) >> P.newline
+
+parseChiseLines :: Parser (Map Kanji Recipe')
+parseChiseLines = M.fromList <$> P.many parseChiseLine
 
 testParser :: [TestFailure]
 testParser = mapMaybe (test $ P.parse parseRecipe "") $ map (second Right) tests
@@ -129,18 +136,14 @@ test f (input, expected) = guard (f input /= expected) >> Just (TestFailure inpu
 
 testResults = testToposort ++ testParser
 
--- concatFileLines ["a.txt", "b.txt"] yields: all lines of a.txt, then all lines of b.txt.
-concatFileLines :: [FilePath] -> IO [String]
-concatFileLines paths = concat <$> mapM (fmap lines . readFile) paths
-
 main :: IO ()
 main = do
     when (not $ null testResults) $ error $ "test(s) failed: " ++ show testResults
-    chiseLines <- concatFileLines [ "chise-ids/IDS-UCS-Basic.txt"
-                                  , "chise-ids/IDS-UCS-Ext-A.txt"
-                                  , "chise-ids/IDS-CDP.txt"
-                                  ]
+    chise <- concat <$> mapM readFile [ "chise-ids/IDS-UCS-Basic.txt"
+                                      , "chise-ids/IDS-UCS-Ext-A.txt"
+                                      , "chise-ids/IDS-CDP.txt"
+                                      ]
     (frequencyList :: [Kanji]) <- lines <$> readFile "frequent-joyo.txt"
     print (length frequencyList)
-    let recipes = parseChise chiseLines
+    let (Right recipes) = P.parse parseChiseLines "" chise
     print (M.size recipes)
