@@ -10,6 +10,7 @@ import qualified Data.Set as S
 import Data.Set (Set)
 import Data.List
 import Data.Maybe
+import Data.Either
 import Data.Foldable
 import System.Directory
 import System.FilePath
@@ -107,6 +108,17 @@ parseChiseLine = P.skipMany commentLine >> parseChiseEntry
 parseChiseMap :: Parser (Map Kanji Recipe')
 parseChiseMap = M.fromList <$> (P.many parseChiseLine <* P.eof)
 
+-- 無事に解析した漢字のマップとともに、解析できなかったラインのリストを返す。
+-- ちょっと適当なんだけど。
+parseChiseMapWithErrors :: String -> (Map Kanji Recipe', [String])
+parseChiseMapWithErrors input = (recipes, errors)
+    where try line = case P.parse parseChiseMap "" (line ++ "\n") of
+                         Left _ -> Left line
+                         Right _ -> Right line
+          notComment line = take 1 line /= ";"
+          (errors, oks) = partitionEithers $ map try $ filter notComment $ lines input
+          Right recipes = P.parse parseChiseMap "" $ unlines oks
+
 testRecipeParser :: [TestFailure]
 testRecipeParser = mapMaybe (test $ P.parse parseRecipe "") $ map (second Right) tests
     where idc c x y = IDC c (Atom x) (Atom y)
@@ -156,14 +168,21 @@ fixedPoint f a =
     let a' = f a in if a == a' then a else fixedPoint f a'
 #endif
 
-readRecipes :: IO (Map Kanji Recipe')
-readRecipes = do
+readRecipes :: (Kanji -> Bool) -> IO (Map Kanji Recipe')
+readRecipes isJoyo = do
     chiseFiles <- getDirectoryContents "chise-ids"
     let isIncluded name = any (`isPrefixOf` name) ["IDS-UCS", "IDS-CDP", "IDS-CNS"]
     let sources = map ("chise-ids" </>) $ filter isIncluded chiseFiles
     chiseText <- concat <$> mapM readFile sources
-    let recipes = case P.parse parseChiseMap "" chiseText of { Right r -> r; Left e -> error $ show e }
-    return recipes    
+    let (recipes, all_errors) = parseChiseMapWithErrors chiseText
+    -- 適当に再びラインずつ漢字をパースする
+    -- TODO: もし常用じゃなくても他の常用漢字に含まれた部分のエラーを除いちゃわないように
+    let errors = filter (isJoyo . take 1 . drop 1 . dropWhile (/= '\t')) all_errors
+    when (not $ null errors) $ do
+        putStrLn "Some joyo lines failed to parse:"
+        mapM_ (T.putStrLn . pack) errors
+        putStrLn ""
+    return recipes
 
 readFrequentJoyo :: IO [Kanji]
 readFrequentJoyo = lines <$> readFile "frequent-joyo.txt"
@@ -179,7 +198,7 @@ main :: IO ()
 main = do
     when (not $ null testResults) $ error $ "test(s) failed: " ++ show testResults
     frequentJoyo <- readFrequentJoyo
-    recipes <- readRecipes
+    recipes <- readRecipes (`elem` frequentJoyo)
 
     -- アトムのリストを手に入れるまで、`frequentJoyo`というリストのすべてを分解する。
     let atoms = atomSet recipes frequentJoyo
