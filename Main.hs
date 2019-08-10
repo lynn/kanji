@@ -36,13 +36,13 @@ data Recipe a = Atom a
 type Recipe' = Recipe String
 
 ----------
--- topo --
+-- 整理 --
 ----------
 
 toposort :: Eq a => Map a [a] -> [[a]]
 toposort m = reverse $ snd $ until (null . fst) freeNodes (m, [])
     where freeNodes :: Eq a => (Map a [a], [[a]]) -> (Map a [a], [[a]])
-          freeNodes (m, result) = if dependent == m then (M.empty, []) -- cycle check
+          freeNodes (m, result) = if dependent == m then (M.empty, []) -- サイクル・チェック
                                   else (dependent, free:result)
               where (free_m, dependent_m) = M.partition null m
                     free = M.keys free_m
@@ -50,19 +50,19 @@ toposort m = reverse $ snd $ until (null . fst) freeNodes (m, [])
 
 testToposort :: [TestFailure]
 testToposort = mapMaybe (test toposort) $ map (first M.fromList) tests
-    where free i = (i, []) -- for legibility
+    where free i = (i, []) -- 読みやすいように
           tests = [([], []),
                    ([(0, [1,2]), free 1, free 2], [[1,2],[0]]),
-                   ([free 0, (1, [0,0])], []), -- duplicate in list (deemed illegal)
-                   ([(1, [2]), (2, [1])], []), -- cycle
+                   ([free 0, (1, [0,0])], []), -- ダブる（違反だという）
+                   ([(1, [2]), (2, [1])], []), -- サイクル
                    (
                        [free 1, free 2, free 3, (4, [2]), (5, [1,3]), (6, [1,4])],
                         [[1,2,3], [4,5], [6]]
                    )]
 
------------
--- parse --
------------
+----------
+-- 解析 --
+----------
 
 isIDC :: Char -> Bool
 isIDC c = c `elem` ['⿰'..'⿻'] \\ "⿲⿳"
@@ -97,7 +97,7 @@ parseChiseEntry = do
     name    <- P.manyTill P.anyChar P.tab
     kanji   <- P.manyTill P.anyChar P.tab
     recipe  <- parseRecipe
-    comment <- P.manyTill P.anyChar P.endOfLine -- e.g. the "\t?" in IDS-UCS-Basic.txt:887
+    comment <- P.manyTill P.anyChar P.endOfLine -- たとえばIDS-UCS-Basic.txt:887の"\t?"
     pure (kanji, recipe)
 
 parseChiseLine :: Parser (Kanji, Recipe')
@@ -132,9 +132,9 @@ testChiseParser = catMaybes [test (P.parse parseChiseMap "") (input, output)]
             [ ("兠", IDC '⿱' (IDC3 '⿲' (Atom "&CDP-8BC5;") (Atom "白") (Atom "匕")) (Atom "儿"))
             , ("兡", IDC '⿺' (Atom "克") (Atom "百")) ]
 
-------------------
--- test harness --
-------------------
+----------------------
+-- テスト・ハーネス --
+----------------------
 
 data TestFailure = forall a. (Show a) => TestFailure a
 instance Show TestFailure where show (TestFailure x) = show x
@@ -143,6 +143,10 @@ test :: (Show a, Eq b) => (a -> b) -> (a, b) -> Maybe TestFailure
 test f (input, expected) = guard (f input /= expected) >> Just (TestFailure input)
 
 testResults = testToposort ++ testRecipeParser ++ testChiseParser
+
+--------------
+-- レシピー --
+--------------
 
 fixedPoint :: Eq a => (a -> a) -> a -> a
 fixedPoint f a =
@@ -164,12 +168,12 @@ readRecipes = do
 readFrequentJoyo :: IO [Kanji]
 readFrequentJoyo = lines <$> readFile "frequent-joyo.txt"
 
--- Given a recipe map and a list of kanji, return the set of atoms that those
--- kanji break down into if you keep looking up their components.
+-- レシピーのマップと漢字のリスとを与えられて、
+-- その漢字の部分を引きつづけると、やがてその漢字が分解されるアトムのセットを返す。
 atomSet :: Map Kanji Recipe' -> [Kanji] -> [Kanji]
 atomSet recipes ks = sort $ fixedPoint iterate ks
     where iterate = nub . concatMap (toList . lookup)
-          lookup k = M.findWithDefault (Atom k) k recipes  -- If we can't find a recipe, we assume it's atomic
+          lookup k = M.findWithDefault (Atom k) k recipes  -- レシピーが見つからないと、不可分だとする。
 
 main :: IO ()
 main = do
@@ -177,7 +181,7 @@ main = do
     frequentJoyo <- readFrequentJoyo
     recipes <- readRecipes
 
-    -- Break everything in the `frequentJoyo` list down until we have a list of atoms.
+    -- アトムのリストを手に入れるまで、`frequentJoyo`というリストのすべてを分解する。
     let atoms = atomSet recipes frequentJoyo
     let isForeign k = M.notMember k recipes
     putStrLn $ "Atoms: " ++ unwords atoms
